@@ -1,0 +1,184 @@
+{
+    "name": "AMI2GMI", // experiments name
+    "gpu_ids": [0], // gpu ids list, default is single 0
+    "seed" : 42, // random seed, seed <0 represents randomization not used 
+    "finetune_norm": false, // find the parameters to optimize
+
+    "path": { //set every part file path
+        "base_dir": "experiments", // base path for all log except resume_state
+        "code": "code", // code backup
+        "tb_logger": "tb_logger", // path of tensorboard logger
+        "results": "results",
+        "checkpoint": "checkpoint",
+        // "resume_state": "experiments/inpainting_places2_220413_143231/checkpoint/25" 
+        "resume_state": null
+    },
+
+    "datasets": { // train or test
+        "train": { 
+            "which_dataset": {
+                "name": ["data.minmax_dataset", "Swath_MinMax"], // ["data.minmax_dataset", "Swath_MinMax"] , ["data.zscore_dataset", "Swath_ZScore"]
+                "args":{
+                    "image_dir": "/data-8t/khoon/rsrch_GMI5/dataset/v2",
+                    "app": "train",
+                    "stats_model_dir": "./data/stats_models",
+                    "data_len": -1
+                } 
+            },
+            "dataloader":{
+                "validation_split": 0,  // [중요] 0으로 변경 (자동 분할 끄기)
+                "args":{ // arguments to initialize train_dataloader
+                    "batch_size": 4, // gpu 한개 당 배치
+                    "num_workers": 4,
+                    "shuffle": true,
+                    "pin_memory": true,
+                    "drop_last": true
+                },
+                "val_args":{ // arguments to initialize valid_dataloader, will overwrite the parameters in train_dataloader
+                    "batch_size": 2, // 모든 gpu에 할당되는 배치 총합
+                    "num_workers": 4,
+                    "shuffle": false,
+                    "pin_memory": true,
+                    "drop_last": false
+                }
+            }
+        },
+        "val": {
+            "which_dataset": {
+                // "name": ["data.dataset", "AMI2HSRDataset"],
+                "name": ["data.minmax_dataset", "Swath_MinMax"], // ["data.minmax_dataset", "Swath_MinMax"] , ["data.zscore_dataset", "Swath_ZScore"]
+                "args": {
+                    "image_dir": "/data-8t/khoon/rsrch_GMI5/dataset/v2",
+                    "stats_model_dir": "./data/stats_models",
+                    "app": "val",
+                    "data_len": -1 // 혹은 테스트용으로 소량(예: 50)만
+                }
+            }
+        },
+        "test": { 
+            "which_dataset": {
+                // "name": "AMI2HSRDataset", // import Dataset() class / function(not recommend) from default file
+                "name": ["data.minmax_dataset", "Swath_MinMax"], // ["data.minmax_dataset", "Swath_MinMax"] , ["data.zscore_dataset", "Swath_ZScore"]
+                "args":{
+                    "image_dir": "/data-8t/khoon/rsrch_GMI5/dataset/v2",
+                    "app": "train",
+                    "stats_model_dir": "./data/stats_models"
+                }
+            },
+            "dataloader":{
+                "args":{
+                    "batch_size": 8,
+                    "num_workers": 4,
+                    "pin_memory": true
+                }
+            }
+        }
+    },
+
+    "model": {
+        "which_model": {
+            "name": ["models.model", "Palette"],
+            "args": {
+                "sample_num": 8,
+                "task": "colorization",
+                "ema_scheduler": {
+                    "ema_start": 1,
+                    "ema_iter": 1,
+                    "ema_decay": 0.9999
+                },
+                "optimizers": [
+                    { "lr": 5e-5, "weight_decay": 0}
+                ]
+                // "lr_schedulers": [
+                //     {
+                //         "name": ["torch.optim.lr_scheduler", "CosineAnnealingLR"],
+                //         "args": {
+                //             "T_max": 300,      // 전체 학습 에폭 수 (n_epoch와 맞춰주세요)
+                //             "eta_min": 1e-7    // 최소 학습률 (여기까지 떨어짐)
+                //         }
+                //     }
+                // ]
+            }
+        }, 
+        "which_networks": [
+            {
+                "name": ["models.network", "Network"],
+                "args": {
+                    "init_type": "kaiming", // method can be [normal | xavier| xavier_uniform | kaiming | orthogonal], default is kaiming
+                    "module_name": "guided_diffusion", // sr3 | guided_diffusion
+                    "unet": {
+                        "in_channel": 8,
+                        "out_channel": 1,
+                        "inner_channel": 64,
+                        "channel_mults": [
+                            1,
+                            2,
+                            4,
+                            8
+                        ],
+                        "attn_res": [
+                            48
+                            // 32,
+                            // 16
+                            // 8
+                        ],
+                        "num_head_channels": 32,
+                        "res_blocks": 2,
+                        "dropout": 0.2,
+                        "image_size": 384
+                    },
+                    "beta_schedule": {
+                        "train": {
+                            "schedule": "linear", // linear or cosine
+                            "n_timestep": 1000,
+                            // "n_timestep": 10, // debug
+                            "linear_start": 1e-6, 
+                            "linear_end": 0.01
+                        },
+                        "test": {
+                            "schedule": "linear", // linear or cosine
+                            "n_timestep": 2000,
+                            "linear_start": 1e-4,
+                            "linear_end": 0.09
+                        }
+                    }
+                }
+            }
+        ],
+//        "which_losses": [ // import designated list of losses without arguments
+//            "mse_loss" // models/losses.py  [mse_loss, l1_loss, smooth_l1_loss, WeightedMSELoss]
+//        ],
+
+        "which_losses": [ 
+            {
+                "name": ["models.loss", "ls_weighted_l1_loss"],
+                "args": {
+                    "alpha": 0.3,
+                    "threshold_norm": 0.53846,
+                    "weight_low": 3.0,
+                    "weight_high": 1.0
+                }
+            }
+        ],
+
+        "which_metrics": [
+            "cc", "rmse", "mae", "ssim", "pod", "far", "csi"
+]
+    },
+
+    "train": { // arguments for basic training
+        "n_epoch": 1e8, // max epochs, not limited now
+        "n_iter": 1e8, // max interations
+        "val_epoch": 1, // valdation every specified number of epochs
+        "save_checkpoint_epoch": 1,
+        "log_iter": 1e4, // log every specified number of iterations
+        "tensorboard" : true // tensorboardX enable
+    },
+    
+    "debug": { // arguments in debug mode, which will replace arguments in train
+        "val_epoch": 1,
+        "save_checkpoint_epoch": 1,
+        "log_iter": 10,
+        "debug_split": 50 // percent or number, change the size of dataloder to debug_split.
+    }
+}

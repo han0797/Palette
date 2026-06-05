@@ -1,0 +1,162 @@
+{
+    "name": "AMI2GMI", // experiments name
+    "gpu_ids": [0], // gpu ids list, default is single 0
+    "seed" : 42, // random seed, seed <0 represents randomization not used
+    "finetune_norm": false, // find the parameters to optimize
+
+    "path": { //set every part file path
+        "base_dir": "experiments", // base path for all log except resume_state
+        "code": "code", // code backup
+        "tb_logger": "tb_logger", // path of tensorboard logger
+        "results": "results",
+        "checkpoint": "checkpoint",
+        "resume_state": null
+    },
+
+    "datasets": { // train or test
+        "train": {
+            "which_dataset": {
+                "name": ["data.minmax_dataset", "Swath_MinMax"],
+                "args":{
+                    "image_dir": "/data-8t/khoon/rsrch_GMI5/dataset/v2",
+                    "app": "train",
+                    "stats_model_dir": "./data/stats_models",
+                    "data_len": -1  // 전체 사용; 빠른 실험 시 50~100으로 줄일 것
+                }
+            },
+            "dataloader":{
+                "validation_split": 0,
+                "args":{
+                    "batch_size": 4,
+                    "num_workers": 4,
+                    "shuffle": true,
+                    "pin_memory": true,
+                    "drop_last": true
+                },
+                "val_args":{
+                    "batch_size": 2,
+                    "num_workers": 4,
+                    "shuffle": false,
+                    "pin_memory": true,
+                    "drop_last": false
+                }
+            }
+        },
+        "val": {
+            "which_dataset": {
+                "name": ["data.minmax_dataset", "Swath_MinMax"],
+                "args": {
+                    "image_dir": "/data-8t/khoon/rsrch_GMI5/dataset/v2",
+                    "stats_model_dir": "./data/stats_models",
+                    "app": "val",
+                    "data_len": -1
+                }
+            }
+        },
+        "test": {
+            "which_dataset": {
+                "name": ["data.minmax_dataset", "Swath_MinMax"],
+                "args":{
+                    "image_dir": "/data-8t/khoon/rsrch_GMI5/dataset/v2",
+                    "app": "train",
+                    "stats_model_dir": "./data/stats_models"
+                }
+            },
+            "dataloader":{
+                "args":{
+                    "batch_size": 8,
+                    "num_workers": 4,
+                    "pin_memory": true
+                }
+            }
+        }
+    },
+
+    "model": {
+        "which_model": {
+            "name": ["models.model", "Palette"],
+            "args": {
+                "sample_num": 8,
+                "task": "colorization",
+                "ema_scheduler": {
+                    "ema_start": 1,
+                    "ema_iter": 1,
+                    "ema_decay": 0.9999
+                },
+                "optimizers": [
+                    { "lr": 5e-5, "weight_decay": 0}
+                ]
+            }
+        },
+        "which_networks": [
+            {
+                "name": ["models.network", "Network"],
+                "args": {
+                    "init_type": "kaiming",
+                    "module_name": "guided_diffusion",
+                    "unet": {
+                        "in_channel": 8,
+                        "out_channel": 1,
+                        "inner_channel": 64,
+                        "channel_mults": [1, 2, 4, 8],
+                        "attn_res": [48],
+                        // [96, 48]로 변경 시 ~10.9GB 추가 VRAM 필요 — GPU 여유 확인 후 적용
+                        "num_head_channels": 32,
+                        "res_blocks": 2,
+                        "dropout": 0.2,
+                        "image_size": 384
+                    },
+                    "beta_schedule": {
+                        "train": {
+                            "schedule": "linear",
+                            "n_timestep": 1000,
+                            // "n_timestep": 10, // debug
+                            "linear_start": 1e-6,
+                            "linear_end": 0.01
+                        },
+                        "test": {
+                            "schedule": "linear",
+                            "n_timestep": 1000,
+                            "linear_start": 1e-4,
+                            "linear_end": 0.09
+                        }
+                    }
+                }
+            }
+        ],
+
+        "which_losses": [
+            {
+                "name": ["models.loss", "structural_weighted_loss"],
+                "args": {
+                    "alpha": 0.3,
+                    "threshold_norm": 0.76923,
+                    "weight_low": 3.0,
+                    "weight_high": 1.0,
+                    "lambda_grad": 0.5,
+                    "lambda_ssim": 0.0
+                }
+            }
+        ],
+
+        "which_metrics": [
+            "cc", "rmse", "mae", "ssim", "pod", "far", "csi"
+        ]
+    },
+
+    "train": {
+        "n_epoch": 1e8,
+        "n_iter": 1e8,
+        "val_epoch": 1,
+        "save_checkpoint_epoch": 1,
+        "log_iter": 500, // ~7 epoch마다 (284샘플 / batch4 = 71iter/epoch)
+        "tensorboard" : true
+    },
+
+    "debug": {
+        "val_epoch": 1,
+        "save_checkpoint_epoch": 1,
+        "log_iter": 10,
+        "debug_split": 50
+    }
+}
